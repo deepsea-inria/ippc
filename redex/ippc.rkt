@@ -79,9 +79,44 @@
                           VAR_1)
    MACHINE-VALUE_1])
 
+(define -->thread
+  (reduction-relation
+   IPPC #:domain THREAD
+
+   (--> (thread (stack (frame CFG-LABEL_f (BB-LABEL_pred BB-LABEL_succ) ARG_f ...) FRAME_after ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                (basic-block BB-LABEL_1 ()
+                             (call CFG-LABEL_g BB-LABEL_retg ARG_g ...)))
+        (thread (stack (frame CFG-LABEL_g ((entry-label) (return-label)) ARG_g ...)
+                       (frame CFG-LABEL_f (BB-LABEL_pred BB-LABEL_retg) ARG_f ...)
+                       FRAME_after ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                BB_entry)
+        (where CFG_gr (lookup-function PROGRAM_1 CFG-LABEL_g))
+        (where BB_entry (lookup-basic-block CFG_gr (entry-label)))
+        thread-call)
+
+  (--> (thread (stack (frame CFG-LABEL_f (BB-LABEL_fpred BB-LABEL_fsucc) ARG_f ...)
+                      (frame CFG-LABEL_g (BB-LABEL_gpred BB-LABEL_gsucc) ARG_g ...) FRAME_after ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                (basic-block BB-LABEL_1 ()
+                             (return)))
+       (thread (stack (frame CFG-LABEL_g (BB-LABEL_gsucc BB-LABEL_gsucc) ARG_g ...) FRAME_after ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                BB_gret)
+       (where CFG_gr (lookup-function PROGRAM_1 CFG-LABEL_g))
+       (where BB_gret (lookup-basic-block CFG_gr BB-LABEL_gsucc))
+       thread-return)
+  
+  ))
+
 (define bb1
   (term
-   (basic-block (entry-label) () (call foo (return-label)))))
+   (basic-block (entry-label) () (call bar lab3 (x 23)))))
 
 (define cfg1
   (term
@@ -89,37 +124,14 @@
          (,bb1
           (basic-block lab3 () (jump lab32))))))
 
+(define cfg2
+  (term
+    (cfg bar
+         ((basic-block (entry-label) () (return))))))
+
 (define thread1
   (term
    (thread (stack (frame foo ((entry-label) lsucc) (x 1)))
            ()
-           (program ,cfg1)
+           (program ,cfg1 ,cfg2)
            ,bb1)))
-
-(define prob
-  (term
-   (thread (stack (frame foo ((entry-label) ((return-label))))
-                  (frame foo ((entry-label) (return-label)) (x 1)))
-           ()
-           (program (cfg foo ((basic-block (entry-label) () (call foo (return-label))) (basic-block lab3 () (jump lab32)))))
-           (basic-block (entry-label) () (call foo (return-label))))))
-
-(define -->thread
-  (reduction-relation
-   IPPC #:domain THREAD
-
-   (--> (thread (stack (frame CFG-LABEL_f (BB-LABEL_pred BB-LABEL_succ) ARG_f ...)
-                       FRAME_after ...)
-                CHUNK-STORE_1
-                PROGRAM_1
-                (basic-block BB-LABEL_1 () (call CFG-LABEL_g BB-LABEL_retg ARG_g ...)))
-        (thread (stack (frame CFG-LABEL_g ((entry-label) (return-label)) ARG_g ...)
-                       (frame CFG-LABEL_f (BB-LABEL_pred BB-LABEL_retg) ARG_f ...)
-                       FRAME_after ...)
-                CHUNK-STORE_1
-                PROGRAM_1
-                BB_entry)
-        (where CFG_fr (lookup-function PROGRAM_1 CFG-LABEL_f))
-        (where BB_entry (lookup-basic-block CFG_fr (entry-label)))
-        thread-call)))
-               
