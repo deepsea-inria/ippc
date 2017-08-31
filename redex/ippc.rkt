@@ -2,16 +2,18 @@
 (require redex)
 
 (define-language IPPC
-  (THREAD ::= (thread STACK CHUNK-STORE PROGRAM BB))
+  (THREAD ::= (thread STACK CHUNK-STORE PROGRAM FUEL BB))
+  (FUEL ::= number)
   (STACK ::= (stack FRAME ...))
   (FRAME ::= (frame ACTIVATION-ID CFG-LABEL TRAMPOLINE ARG ...)) ; stack frame
   (ACTIVATION-ID ::= variable-not-otherwise-mentioned) ; unique id of a stack frame
-  (ARG ::= (VAR MACHINE-VAL)) ; function argument
   (TRAMPOLINE ::= (BB-LABEL BB-LABEL)) ; the trampoline consists of a pair
                                        ; of basic-block labels, namely
                                        ;  (predecessor, successor)
                                        ; where predecessor refers to the current
                                        ; basic block and successor to the next one.
+  (ARG ::= (VAR MACHINE-VAL)) ; function argument
+  
   (MACHINE-VAL ::=
                (mv-number number)
                (mv-csl CHUNK-STORE-LOCATION)
@@ -35,7 +37,7 @@
   (CONTROL-OP ::=
               (jump BB-LABEL)
               (conditional-jump MACHINE-VAL BB-LABEL ...) ; (conditional-jump i lab ...)
-                                                      ; jump to ith basic-block label in lab ...
+                                                          ; jump to ith basic-block label in lab ...
               (call CFG-LABEL BB-LABEL (VAR MACHINE-VAL) ...)   ; (call f lab args ...)
                                                                 ; call function f passing argument list
                                                                 ; args ..., and upon return jumping to
@@ -85,23 +87,44 @@
   (reduction-relation
    IPPC #:domain THREAD
 
-   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_pred BB-LABEL_succ) ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
+   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
-                (basic-block BB-LABEL_1 ((frame-store VAR_f MACHINE-VAL_f2) INSTR_f ...)
-                             CONTROL-OP_1))
-        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_pred BB-LABEL_retg) ARG_fbefore ... (VAR_f MACHINE-VAL_f2) ARG_fafter ...)
+                FUEL_1
+                (basic-block BB-LABEL_f ((frame-store VAR_f MACHINE-VAL_f2) INSTR_f ...)
+                             CONTROL-OP_f))
+        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f2) ARG_fafter ...)
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
-                (basic-block BB-LABEL_1 (INSTR_f ...)
-                             CONTROL-OP_1))
+                FUEL_1
+                (basic-block BB-LABEL_f (INSTR_f ...)
+                             CONTROL-OP_f))
+        (side-condition (> (term FUEL_1) 0))
         frame-store-hd)
+
+   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_fpred BB-LABEL_fsucc) ARG_f ...) FRAME_fafter ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                FUEL_1
+                (basic-block BB-LABEL_1 ()
+                             (jump BB-LABEL_2)))
+        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_fsucc BB-LABEL_2) ARG_f ...)
+                       FRAME_fafter ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                FUEL_1
+                BB_entry)
+        (where CFG_fr (lookup-function PROGRAM_1 CFG-LABEL_f))
+        (where BB_entry (lookup-basic-block CFG_fr BB-LABEL_2))
+        (side-condition (> (term FUEL_1) 0))
+        thread-jump)
 
    (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_pred BB-LABEL_succ) ARG_f ...) FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
+                FUEL_1
                 (basic-block BB-LABEL_1 ()
                              (call CFG-LABEL_g BB-LABEL_retg ARG_g ...)))
         (thread (stack (frame ACTIVATION-ID_g  CFG-LABEL_g ((entry-label) (return-label)) ARG_g ...)
@@ -109,24 +132,29 @@
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
+                FUEL_1
                 BB_entry)
         (where CFG_gr (lookup-function PROGRAM_1 CFG-LABEL_g))
         (where BB_entry (lookup-basic-block CFG_gr (entry-label)))
-        thread-call
-        (fresh ACTIVATION-ID_g))
+        (fresh ACTIVATION-ID_g)
+        (side-condition (> (term FUEL_1) 0))
+        thread-call)
 
   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_fpred BB-LABEL_fsucc) ARG_f ...)
                       (frame ACTIVATION-ID_g CFG-LABEL_g (BB-LABEL_gpred BB-LABEL_gsucc) ARG_g ...) FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
+                FUEL_1
                 (basic-block BB-LABEL_1 ()
                              (return)))
        (thread (stack (frame ACTIVATION-ID_g CFG-LABEL_g (BB-LABEL_gsucc BB-LABEL_gsucc) ARG_g ...) FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
+                FUEL_1
                 BB_gret)
        (where CFG_gr (lookup-function PROGRAM_1 CFG-LABEL_g))
        (where BB_gret (lookup-basic-block CFG_gr BB-LABEL_gsucc))
+       (side-condition (> (term FUEL_1) 0))
        thread-return)
   
   ))
@@ -148,27 +176,30 @@
 
 (define thread1
   (term
-   (thread (stack (frame x123 foo ((entry-label) lsucc) (x (mv-number 1))))
+   (thread (stack (frame ACTIVATION-ID_g foo ((entry-label) lsucc) (x (mv-number 1))))
            ()
            (program ,cfg1 ,cfg2)
+           10
            ,bb1)))
 
 (define thread2
   (term
    (thread
-    (stack (frame ACTIVATION-ID_g bar ((entry-label) (return-label)) (x (mv-number 23))) (frame x123 foo ((entry-label) lab3) (x (mv-number 1))))
+    (stack (frame tttg bar ((entry-label) (return-label)) (x (mv-number 23))) (frame x123 foo ((entry-label) lab3) (x (mv-number 1))))
     ()
     (program
      (cfg foo ((basic-block (entry-label) () (call bar lab3 (x (mv-number 23)))) (basic-block lab3 () (jump lab32))))
      (cfg bar ((basic-block (entry-label) () (return)))))
+    33
     (basic-block (entry-label) () (return)))))
 
 (define thread3
   (term
    (thread
-    (stack (frame ACTIVATION-ID_g bar ((entry-label) (return-label)) (x (mv-number 23))) (frame x123 foo ((entry-label) lab3) (x (mv-number 1))))
+    (stack (frame xxxg bar ((entry-label) (return-label)) (x (mv-number 23))) (frame x123 foo ((entry-label) lab3) (x (mv-number 1))))
     ()
     (program
      (cfg foo ((basic-block (entry-label) () (call bar lab3 (x (mv-number 23)))) (basic-block lab3 () (jump lab32))))
      (cfg bar ((basic-block (entry-label) () (return)))))
+    8
     (basic-block (entry-label) ((frame-store x (mv-number 3232))) (return)))))
