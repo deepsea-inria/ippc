@@ -82,26 +82,44 @@
   (eq? (symbol-of-mv mv) `mv-var))
 
 (define-metafunction IPPC
-  lookup-frame-variable : FRAME VAR -> MACHINE-VAL
-  [(lookup-frame-variable (frame ACTIVATION-ID_1 CFG-LABEL_1 TRAMPOLINE_1
-                                 (VAR_before MACHINE-VAL_before) ...
-                                 (VAR_1 MACHINE-VAL_1)
-                                 (VAR_after MACHINE-VAL_after) ...)
+  lookup-frame-variable : (ARG ...) VAR -> MACHINE-VAL
+  [(lookup-frame-variable ((VAR_before MACHINE-VAL_before) ...
+                           (VAR_1 MACHINE-VAL_1)
+                           (VAR_after MACHINE-VAL_after) ...)
                           VAR_1)
    MACHINE-VAL_1
    (side-condition (not (mv-var? (term MACHINE-VAL_1))))]
-  [(lookup-frame-variable (frame ACTIVATION-ID_1 CFG-LABEL_1 TRAMPOLINE_1
-                                 (VAR_before MACHINE-VAL_before) ...
-                                 (VAR_1 MACHINE-VAL_1)
-                                 (VAR_after MACHINE-VAL_after) ...)
+  [(lookup-frame-variable ((VAR_before MACHINE-VAL_before) ...
+                           (VAR_1 MACHINE-VAL_1)
+                           (VAR_after MACHINE-VAL_after) ...)
                           VAR_1)
-   (lookup-frame-variable (frame ACTIVATION-ID_1 CFG-LABEL_1 TRAMPOLINE_1
-                                 (VAR_before MACHINE-VAL_before) ...
-                                 (VAR_1 MACHINE-VAL_1)
-                                 (VAR_after MACHINE-VAL_after) ...)
+   (lookup-frame-variable ((VAR_before MACHINE-VAL_before) ...
+                           (VAR_1 MACHINE-VAL_1)
+                           (VAR_after MACHINE-VAL_after) ...)
                           VAR_2)
    (where (mv-var VAR_2) MACHINE-VAL_1)])
 
+(define-metafunction IPPC
+  resolve-machine-val : (ARG ...) MACHINE-VAL -> MACHINE-VAL
+  [(resolve-machine-val (ARG_1 ...) (mv-number number_1)) (mv-number number_1)]
+  [(resolve-machine-val (ARG_1 ...) (mv-csl number_1)) (mv-csl number_1)]
+  [(resolve-machine-val (ARG_1 ...) (mv-ipfs-hash number_1)) (mv-ipfs-hash number_1)]
+  [(resolve-machine-val (ARG_1 ...) (mv-var VAR_1)) (lookup-frame-variable (ARG_1 ...) VAR_1)])
+
+(define-metafunction IPPC
+  resolve-machine-vals : (ARG ...) (MACHINE-VAL ...) -> (MACHINE-VAL ...)
+  [(resolve-machine-vals (ARG_1 ...) (MACHINE-VAL_1 ...))
+   ((resolve-machine-val (ARG_1 ...) MACHINE-VAL_1) ...)])
+
+(define-metafunction IPPC
+  force-machine-number : MACHINE-VAL -> number
+  [(force-machine-number (mv-number number_1)) number_1])
+
+(define-metafunction IPPC
+  resolve-machine-val-to-number : (ARG ...) MACHINE-VAL -> number
+  [(resolve-machine-val-to-number (ARG_1 ...) MACHINE-VAL_1)
+   (force-machine-number (resolve-machine-val (ARG_1 ...) MACHINE-VAL_1))])
+                                              
 (define (op-of-symbol symb)
   (match symb
     [`+ +]
@@ -109,22 +127,18 @@
     [`* *]
     [`/ /]))
 
-(define (number-of-machine-val mv)
-  (match mv
-    [`(mv-number ,n) n]))
-
 (define -->thread
   (reduction-relation
    IPPC #:domain THREAD
 
-   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
+   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_1 ...)
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
                 FUEL_1
                 (basic-block BB-LABEL_f ((arith VAR_f OP_f MACHINE-VAL_arith ...) INSTR_f ...)
                              CONTROL-OP_f))
-        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
+        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_1 ...)
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
@@ -132,17 +146,17 @@
                 (basic-block BB-LABEL_f ((frame-store VAR_f (mv-number number_res)) INSTR_f ...)
                              CONTROL-OP_f))
         (side-condition (> (term FUEL_1) 0))
-        (where number_res ,(apply (op-of-symbol (term OP_f)) (map number-of-machine-val (term (MACHINE-VAL_arith ...)))))
+        (where number_res ,(apply (op-of-symbol (term OP_f)) (term ((resolve-machine-val-to-number (ARG_1 ...) MACHINE-VAL_arith) ...))))
         thread-arith)
       
-   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
+   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_f ...)
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
                 FUEL_1
                 (basic-block BB-LABEL_f ((frame-store VAR_f MACHINE-VAL_f2) INSTR_f ...)
                              CONTROL-OP_f))
-        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f2) ARG_fafter ...)
+        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_f ...)
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
@@ -168,6 +182,25 @@
         (where BB_entry (lookup-basic-block CFG_fr BB-LABEL_2))
         (side-condition (> (term FUEL_1) 0))
         thread-jump)
+
+   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_fpred BB-LABEL_fsucc) ARG_f ...) FRAME_fafter ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                FUEL_1
+                (basic-block BB-LABEL_1 ()
+                             (conditional-jump MACHINE-VAL_tgt BB-LABEL_2 ...)))
+        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_fsucc BB-LABEL_3) ARG_f ...)
+                       FRAME_fafter ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                ,(sub1 (term FUEL_1))
+                BB_entry)
+        (where number_bb (resolve-machine-val-to-number (ARG_f ...) MACHINE-VAL_tgt))
+        (where BB-LABEL_3 ,(list-ref (term (BB-LABEL_2 ...)) (term number_bb)))
+        (where CFG_fr (lookup-function PROGRAM_1 CFG-LABEL_f))
+        (where BB_entry (lookup-basic-block CFG_fr BB-LABEL_3))
+        (side-condition (> (term FUEL_1) 0))
+        thread-conditional-jump)
 
    (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_pred BB-LABEL_succ) ARG_f ...) FRAME_after ...)
                 CHUNK-STORE_1
@@ -273,3 +306,14 @@
     (cfg bar ((basic-block (entry-label) () (return)))))
    7
    (basic-block (entry-label) ((frame-store x (mv-number 3233))) (return)))))
+
+(define thread6
+  (term
+   (thread
+   (stack (frame xxxg bar ((entry-label) (return-label)) (x (mv-number 23))) (frame x123 foo ((entry-label) lab3) (x (mv-number 1))))
+   ()
+   (program
+    (cfg foo ((basic-block (entry-label) () (call bar lab3 (x (mv-number 23)))) (basic-block lab3 () (jump lab32))))
+    (cfg bar ((basic-block (entry-label) () (return)))))
+   7
+   (basic-block (entry-label) () (conditional-jump (mv-number 0) (entry-label))))))
