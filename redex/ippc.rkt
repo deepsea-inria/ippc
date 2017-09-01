@@ -112,6 +112,11 @@
    ((resolve-machine-val (ARG_1 ...) MACHINE-VAL_1) ...)])
 
 (define-metafunction IPPC
+  resolve-arg : (ARG ...) ARG -> ARG
+  [(resolve-arg (ARG_1 ...) (VAR_1 MACHINE-VAL_1))
+   (VAR_1 (resolve-machine-val (ARG_1 ...) MACHINE-VAL_1))])
+
+(define-metafunction IPPC
   force-machine-number : MACHINE-VAL -> number
   [(force-machine-number (mv-number number_1)) number_1])
 
@@ -208,7 +213,7 @@
                 FUEL_1
                 (basic-block BB-LABEL_1 ()
                              (call CFG-LABEL_g BB-LABEL_retg ARG_g ...)))
-        (thread (stack (frame ACTIVATION-ID_g  CFG-LABEL_g ((entry-label) (return-label)) ARG_g ...)
+        (thread (stack (frame ACTIVATION-ID_g  CFG-LABEL_g ((entry-label) (return-label)) (resolve-arg (ARG_f ...) ARG_g) ...)
                        (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_pred BB-LABEL_retg) ARG_f ...)
                        FRAME_after ...)
                 CHUNK-STORE_1
