@@ -102,9 +102,38 @@
                           VAR_2)
    (where (mv-var VAR_2) MACHINE-VAL_1)])
 
+(define (op-of-symbol symb)
+  (match symb
+    [`+ +]
+    [`- -]
+    [`* *]
+    [`/ /]))
+
+(define (number-of-machine-val mv)
+  (match mv
+    [`(mv-number ,n) n]))
+
 (define -->thread
   (reduction-relation
    IPPC #:domain THREAD
+
+   (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
+                       FRAME_after ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                FUEL_1
+                (basic-block BB-LABEL_f ((arith VAR_f OP_f MACHINE-VAL_arith ...) INSTR_f ...)
+                             CONTROL-OP_f))
+        (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
+                       FRAME_after ...)
+                CHUNK-STORE_1
+                PROGRAM_1
+                ,(sub1 (term FUEL_1))
+                (basic-block BB-LABEL_f ((frame-store VAR_f (mv-number number_res)) INSTR_f ...)
+                             CONTROL-OP_f))
+        (side-condition (> (term FUEL_1) 0))
+        (where number_res ,(apply (op-of-symbol (term OP_f)) (map number-of-machine-val (term (MACHINE-VAL_arith ...)))))
+        thread-arith)
       
    (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
                        FRAME_after ...)
@@ -222,3 +251,25 @@
      (cfg bar ((basic-block (entry-label) () (return)))))
     8
     (basic-block (entry-label) ((frame-store x (mv-number 3232))) (return)))))
+
+(define thread4
+  (term
+   (thread
+    (stack (frame xxxg bar ((entry-label) (return-label)) (x (mv-number 23))) (frame x123 foo ((entry-label) lab3) (x (mv-number 1))))
+    ()
+    (program
+     (cfg foo ((basic-block (entry-label) () (call bar lab3 (x (mv-number 23)))) (basic-block lab3 () (jump lab32))))
+     (cfg bar ((basic-block (entry-label) () (return)))))
+    8
+    (basic-block (entry-label) ((arith x + (mv-number 1) (mv-number 3232))) (return)))))
+
+(define thread5
+  (term
+   (thread
+   (stack (frame xxxg bar ((entry-label) (return-label)) (x (mv-number 23))) (frame x123 foo ((entry-label) lab3) (x (mv-number 1))))
+   ()
+   (program
+    (cfg foo ((basic-block (entry-label) () (call bar lab3 (x (mv-number 23)))) (basic-block lab3 () (jump lab32))))
+    (cfg bar ((basic-block (entry-label) () (return)))))
+   7
+   (basic-block (entry-label) ((frame-store x (mv-number 3233))) (return)))))
