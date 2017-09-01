@@ -86,7 +86,7 @@
 (define -->thread
   (reduction-relation
    IPPC #:domain THREAD
-
+      
    (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f TRAMPOLINE_f ARG_fbefore ... (VAR_f MACHINE-VAL_f) ARG_fafter ...)
                        FRAME_after ...)
                 CHUNK-STORE_1
@@ -98,11 +98,11 @@
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
-                FUEL_1
+                ,(sub1 (term FUEL_1))
                 (basic-block BB-LABEL_f (INSTR_f ...)
                              CONTROL-OP_f))
         (side-condition (> (term FUEL_1) 0))
-        frame-store-hd)
+        thread-frame-store-hd)
 
    (--> (thread (stack (frame ACTIVATION-ID_f CFG-LABEL_f (BB-LABEL_fpred BB-LABEL_fsucc) ARG_f ...) FRAME_fafter ...)
                 CHUNK-STORE_1
@@ -114,7 +114,7 @@
                        FRAME_fafter ...)
                 CHUNK-STORE_1
                 PROGRAM_1
-                FUEL_1
+                ,(sub1 (term FUEL_1))
                 BB_entry)
         (where CFG_fr (lookup-function PROGRAM_1 CFG-LABEL_f))
         (where BB_entry (lookup-basic-block CFG_fr BB-LABEL_2))
@@ -132,7 +132,7 @@
                        FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
-                FUEL_1
+                ,(sub1 (term FUEL_1))
                 BB_entry)
         (where CFG_gr (lookup-function PROGRAM_1 CFG-LABEL_g))
         (where BB_entry (lookup-basic-block CFG_gr (entry-label)))
@@ -150,7 +150,7 @@
        (thread (stack (frame ACTIVATION-ID_g CFG-LABEL_g (BB-LABEL_gsucc BB-LABEL_gsucc) ARG_g ...) FRAME_after ...)
                 CHUNK-STORE_1
                 PROGRAM_1
-                FUEL_1
+                ,(sub1 (term FUEL_1))
                 BB_gret)
        (where CFG_gr (lookup-function PROGRAM_1 CFG-LABEL_g))
        (where BB_gret (lookup-basic-block CFG_gr BB-LABEL_gsucc))
