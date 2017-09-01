@@ -74,6 +74,13 @@
                        BB-LABEL_1)
    (basic-block BB-LABEL_1 INSTRS_1 CONTROL-OP_1)])
 
+(define (symbol-of-mv mv)
+  (match mv
+    [`(,symb ,v) symb]))
+
+(define (mv-var? mv)
+  (eq? (symbol-of-mv mv) `mv-var))
+
 (define-metafunction IPPC
   lookup-frame-variable : FRAME VAR -> MACHINE-VAL
   [(lookup-frame-variable (frame ACTIVATION-ID_1 CFG-LABEL_1 TRAMPOLINE_1
@@ -81,7 +88,19 @@
                                  (VAR_1 MACHINE-VAL_1)
                                  (VAR_after MACHINE-VAL_after) ...)
                           VAR_1)
-   MACHINE-VAL_1])
+   MACHINE-VAL_1
+   (side-condition (not (mv-var? (term MACHINE-VAL_1))))]
+  [(lookup-frame-variable (frame ACTIVATION-ID_1 CFG-LABEL_1 TRAMPOLINE_1
+                                 (VAR_before MACHINE-VAL_before) ...
+                                 (VAR_1 MACHINE-VAL_1)
+                                 (VAR_after MACHINE-VAL_after) ...)
+                          VAR_1)
+   (lookup-frame-variable (frame ACTIVATION-ID_1 CFG-LABEL_1 TRAMPOLINE_1
+                                 (VAR_before MACHINE-VAL_before) ...
+                                 (VAR_1 MACHINE-VAL_1)
+                                 (VAR_after MACHINE-VAL_after) ...)
+                          VAR_2)
+   (where (mv-var VAR_2) MACHINE-VAL_1)])
 
 (define -->thread
   (reduction-relation
