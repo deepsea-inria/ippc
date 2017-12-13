@@ -2,7 +2,8 @@
 (require redex)
 (require file/sha1)
 
-; http://siek.blogspot.fr/2012/07/the-semantics-of-familiar-language.html
+; Language definition
+; -------------------
 
 (define-language ippc
   (T ::= int (* T) (→ T T ...)) ; types
@@ -24,7 +25,11 @@
   (d ::= (T x (f ...) (f ...) (s ...))) ; function declarations
   (p ::= (d ...))) ; programs
 
+; Support for chunks
+; ------------------
+
 (define-extended-language ippc-chunk ippc
+  (i ::= variable-not-otherwise-mentioned) ; chunk-heap locations
   (h ::= string) ; hash codes
   (v ::= (garbage) number i h) ; values
   (chdr ::= (chdr-fresh) (chdr-owner h) (chdr-copy h)) ; chunk headers
@@ -32,15 +37,18 @@
   ; - (chdr-owner h) indicates the chunk is promoted, it is owned by the node, and its hash is h
   ; - (chdr-copy h) indicates the chunk is promoted, it is a cached copy, and its hash is h
   (c ::= (chdr v ...)) ; chunks
-  (cur ::= ε ((i ...) (h ...) cur)) ; chunk-heap-traversal cursors
+  (μ ::= ((i c) ...)) ; chunk heaps
+  (cur ::= (i h) ((i ...) (h ...) cur)) ; chunk-heap-traversal cursors
   ; - ε empty cursor
   ; - (v ...) list of values to be processed
   ; - (h ...) list of hash values of promoted chunks
   ; - cur the remaining part of the cursor
   (wl ::= (cur ...)) ; chunk-heap-traversal worklists
-  (i ::= variable-not-otherwise-mentioned) ; chunk-heap locations
-  (μ ::= ((i c) ...))) ; chunk heaps
+  (η ::= ((h c) ...))) ; ipfs heaps
 
+; Support for threads
+; -------------------
+  
 (define-extended-language ippc-thread ippc-chunk
   (tid ::= variable-not-otherwise-mentioned) ; thread id
   (ρ ::= ((x v) ...)) ; environments (i.e., frames)
@@ -67,21 +75,24 @@
   ; - σ sequential-machine state
   ; - number the number of incoming thread dependencies
   ; - (tid ...) set of ids of the outgoing thread dependencies
-  
+
+; The abstract machine structure
+; ------------------------------
+
 (define-extended-language ippc-machine ippc-thread
   (msg ::= (thd-decr tid) (chk-del h)) ; intra-node messages
   ; - (thd-decr tid) to decrement the number of incoming dependencies of thread tid
   ; - (chk-del h) to free the memory associated with the chunk associated with hash code h
   (mbx ::= (msg ...)) ; node mailboxes
-  (n ::= ((σ ...) (σ ...) μ mbx)) ; nodes
+  (n ::= ((σ ...) (σ ...) μ η mbx)) ; nodes
   ; - (σ ...) set of ready threads
   ; - (σ ...) set of blocked threads
   ; - μ chunk heap
   ; - mbx mailbox
   (m ::= (n ...))) ; machine states
 
-; Hashing metafunctions
-; ---------------------
+; Metafunctions for hashing
+; -------------------------
 
 (define bytes->hash
   (lambda (bs)
@@ -120,8 +131,8 @@
   List->hash : h ... -> h
   [(List->hash h_1 ...) ,(list->hash (term (h_1 ...)))])
    
-; Chunk metafunctions
-; -------------------
+; Metafunctions for chunks
+; ------------------------
 
 (define-metafunction ippc-chunk
   Make-chunk-owner : h c -> c
@@ -140,36 +151,43 @@
    (side-condition (not (equal? (term chdr_1) (term (chdr-fresh)))))])
 
 (define-metafunction ippc-chunk
-  Plug : h (cur μ) -> (cur μ)
-  [(Plug h_1 ((((i_1) (h_2 ...) ε)) ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...)))
-   (ε ((i_b c_b) ... (i_1 (Make-chunk-owner h_1 c_1)) (i_a c_a) ...))]
-  [(Plug h_1 (((i_1) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...)))
-   (Plug h_3 (cur_1 ((i_b c_b) ... (i_1 (Make-chunk-owner h_1 c_1)) (i_a c_a) ...)))
-   (side-condition (not (equal? (term cur_1) (term ε))))
-   (where h_3 (List->hash ,(reverse (term (h_2 ... h_1)))))]
-  [(Plug h_1 (((i_1 i_3 ...) (h_2 ...) cur_1) μ_1))
-   (((i_3 ...) (h_2 ... h_1) cur_1) μ_1)])
+  Chdr->hash : chdr -> h
+  [(Chdr->hash (chdr-owner h_1)) h_1]
+  [(Chdr->hash (chdr-copy h_1)) h_1])
 
 (define-metafunction ippc-chunk
-  Promote-forward1 : (cur μ) -> (cur μ)
-  [(Promote-forward1 (((i_1 i_2 ...) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 ((chdr-fresh) number_1 ...)) (i_a c_a) ...)))
-   (((i_2 ...) (h_1 h_2 ...) cur_1) ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...))
+  Promote-step : (cur μ η) -> (cur μ η)
+  ; promote a leaf-level chunk
+  [(Promote-step (((i_1 i_2 ...) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 ((chdr-fresh) number_1 ...)) (i_a c_a) ...) ((h_h c_h) ...)))
+   (((i_2 ...) (h_1 h_2 ...) cur_1) ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...) ((h_h c_h) ... (h_1 c_1)))
    (where h_1 (Chunk-contents->hash i_1 (number_1 ...)))
    (where c_1 (Make-chunk-owner h_1 ((chdr-fresh) number_1 ...)))]
-  [(Promote-forward1 (((i_1 i_2 ...) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 ((chdr-fresh) i_3 ...)) (i_a c_a) ...)))
-   (cur_2 ((i_b c_b) ... (i_1 ((chdr-fresh) i_3 ...)) (i_a c_a) ...))
-   (where cur_2 ((i_3 ...) () ((i_1 i_2 ...) (h_2 ...) cur_1)))]
-   ;todo
-  )
+  ; start promoting an interior chunk
+  [(Promote-step (((i_1 i_2 ...) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 ((chdr-fresh) i_n ...)) (i_a c_a) ...) η_1))
+   (cur_2 ((i_b c_b) ... (i_1 ((chdr-fresh) i_n ...)) (i_a c_a) ...) η_1)
+   (where cur_2 ((i_n ...) () ((i_1 i_2 ...) (h_2 ...) cur_1)))]
+  ; reached a chunk that is already promoted
+  [(Promote-step (((i_1 i_2 ...) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 (chdr_1 v_n ...)) (i_a c_a) ...) η_1))
+   (((i_2 ...) (h_1 h_2 ...) cur_1) ((i_b c_b) ... (i_1 (chdr_1 v_n ...)) (i_a c_a) ...) η_1)
+   (side-condition (not (equal? (term chdr_1) (term (chdr-fresh)))))
+   (where h_1 (Chdr->hash chdr_1))]
+  ; reached the end of the promotion
+  [(Promote-step ((() (h_2 ...) (i_1 h_1)) μ_1 η_1))
+   ((i_1 h_3) μ_1 η_1)
+   (where h_3 (List->hash ,(reverse (term (h_2 ...)))))]
+  ; pop the promotion stack
+  [(Promote-step ((() (h_1 ...) ((i_1 i_2 ...) (h_2 ...) cur_1)) ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...) ((h_4 c_4) ...)))
+   (((i_2 ...) (h_3 h_2 ...) cur_1) ((i_b c_b) ... (i_1 c_2) (i_a c_a) ...) ((h_4 c_4) ... (h_3 c_2)))
+   (where c_2 (Make-chunk-owner h_3 c_1))
+   (where h_3 (List->hash ,(reverse (term (h_1 ...)))))])
 
 (define-metafunction ippc-chunk
   Chunk-read : c number -> v
   [(Chunk-read (chdr_1 v_1 ...) number_1) ,(list-ref (term (v_1 ...)) (term number_1))])
 
-; Evaluation of expressions
-; -------------------------
+; Metafunctions for evaluation of expressions
+; -------------------------------------------
 
-; (val e ρ μ)
 ; Evaluates an expression e to a value v in the environment
 ; ρ with chunk heap μ. The result is the value v.
 (define-metafunction ippc-machine
@@ -190,8 +208,8 @@
                                       (side-condition (number? (term v_2)))
                                       (where ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...) μ_1)])
 
-; Control flow
-; ------------
+; Metafunctions for control flow
+; ------------------------------
 
 (define (symbol-of-statement s)
   (match s
@@ -225,8 +243,8 @@
    (s_b ...)
    (where (T_1 x_1 (f_1 ...) (f_2 ...) (s_b ...)) (get-function x_1 (d_1 ...)))])
 
-; Abstract machine
-; ----------------
+; The abstract machine
+; --------------------
 
 ;(define ⟶
 ;  (reduction-relation
@@ -292,3 +310,4 @@
 ;   ))
    
 ; (redex-match? ippc d (term (int foo ((int z)) ((int yy)) (:= yy bar (+ z 2)))))
+; http://siek.blogspot.fr/2012/07/the-semantics-of-familiar-language.html
