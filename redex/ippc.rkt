@@ -32,12 +32,11 @@
   ; - (chdr-owner h) indicates the chunk is promoted, it is owned by the node, and its hash is h
   ; - (chdr-copy h) indicates the chunk is promoted, it is a cached copy, and its hash is h
   (c ::= (chdr v ...)) ; chunks
-  (zip ::= ε ((v ...) (h ...) zip)) ; chunk-heap-traversal zippers
-  ; - ε empty zipper
+  (cur ::= ε ((i ...) (h ...) cur)) ; chunk-heap-traversal cursors
+  ; - ε empty cursor
   ; - (v ...) list of values to be processed
   ; - (h ...) list of hash values of promoted chunks
-  ; - zip the remaining part of the work list
-  (cur ::= (v zip)) ; chunk-heap-traversal cursors
+  ; - cur the remaining part of the cursor
   (wl ::= (cur ...)) ; chunk-heap-traversal worklists
   (i ::= variable-not-otherwise-mentioned) ; chunk-heap locations
   (μ ::= ((i c) ...))) ; chunk heaps
@@ -108,8 +107,14 @@
     (foldl hash-combine nullary-hash hs)))
 
 (define-metafunction ippc-chunk
-  Number->hash : number -> h
-  [(Number->hash number_1) ,(number->hash (term number_1))])
+  Numbers->hash : number ... -> h
+  [(Numbers->hash number_1 ...) ,(list->hash (map number->hash (term (number_1 ...))))])
+
+(define-metafunction ippc-chunk
+  Chunk-contents->hash : variable (number ...) -> h
+  [(Chunk-contents->hash variable_1 (number_1 ...))
+   (hash-combine h_1 (bytes->hash (string->bytes/utf-8 (symbol->string variable_1))))
+   (where h_1 (Numbers->hash number_1 ...))])
 
 (define-metafunction ippc-chunk
   List->hash : h ... -> h
@@ -118,10 +123,44 @@
 ; Chunk metafunctions
 ; -------------------
 
-;(define-metafunction ippc-chunk
-;  Chunk-promote-step : (cur μ) -> (cur μ)
-;  [(Chunk-promote-step ((i_1 zip_1) ((i_b c_b) ... (i_1 ((chdr-owner h_1) v_1 ...)) (i_a c_a) ...)))
-;   ((i_1 zip_1) ((i_b c_b) ... (i_1 ((chdr-owner h_1) v_1 ...)) (i_a c_a) ...))]
+(define-metafunction ippc-chunk
+  Make-chunk-owner : h c -> c
+  [(Make-chunk-owner h_1 ((chdr-fresh) v_1 ...))
+   ((chdr-owner h_1) v_1 ...)]
+  [(Make-chunk-owner h_1 (chdr_1 v_1 ...))
+   (chdr_1 v_1 ...)
+   (side-condition (not (equal? (term chdr_1) (term (chdr-fresh)))))])
+
+(define-metafunction ippc-chunk
+  Make-chunk-copy : h c -> c
+  [(Make-chunk-copy h_1 ((chdr-fresh) v_1 ...))
+   ((chdr-copy h_1) v_1 ...)]
+  [(Make-chunk-copy h_1 (chdr_1 v_1 ...))
+   (chdr_1 v_1 ...)
+   (side-condition (not (equal? (term chdr_1) (term (chdr-fresh)))))])
+
+(define-metafunction ippc-chunk
+  Plug : h (cur μ) -> (cur μ)
+  [(Plug h_1 ((((i_1) (h_2 ...) ε)) ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...)))
+   (ε ((i_b c_b) ... (i_1 (Make-chunk-owner h_1 c_1)) (i_a c_a) ...))]
+  [(Plug h_1 (((i_1) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...)))
+   (Plug h_3 (cur_1 ((i_b c_b) ... (i_1 (Make-chunk-owner h_1 c_1)) (i_a c_a) ...)))
+   (side-condition (not (equal? (term cur_1) (term ε))))
+   (where h_3 (List->hash ,(reverse (term (h_2 ... h_1)))))]
+  [(Plug h_1 (((i_1 i_3 ...) (h_2 ...) cur_1) μ_1))
+   (((i_3 ...) (h_2 ... h_1) cur_1) μ_1)])
+
+(define-metafunction ippc-chunk
+  Promote-forward1 : (cur μ) -> (cur μ)
+  [(Promote-forward1 (((i_1 i_2 ...) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 ((chdr-fresh) number_1 ...)) (i_a c_a) ...)))
+   (((i_2 ...) (h_1 h_2 ...) cur_1) ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...))
+   (where h_1 (Chunk-contents->hash i_1 (number_1 ...)))
+   (where c_1 (Make-chunk-owner h_1 ((chdr-fresh) number_1 ...)))]
+  [(Promote-forward1 (((i_1 i_2 ...) (h_2 ...) cur_1) ((i_b c_b) ... (i_1 ((chdr-fresh) i_3 ...)) (i_a c_a) ...)))
+   (cur_2 ((i_b c_b) ... (i_1 ((chdr-fresh) i_3 ...)) (i_a c_a) ...))
+   (where cur_2 ((i_3 ...) () ((i_1 i_2 ...) (h_2 ...) cur_1)))]
+   ;todo
+  )
 
 (define-metafunction ippc-chunk
   Chunk-read : c number -> v
@@ -130,30 +169,26 @@
 ; Evaluation of expressions
 ; -------------------------
 
-; (val e ρ_1 ρ_2 μ)
-; Evaluates an expression e to a value v in the environments
-; induced primarily by ρ_1, then secondarily, ρ_2, with chunk
-; heap μ. The result is the value v.
+; (val e ρ μ)
+; Evaluates an expression e to a value v in the environment
+; ρ with chunk heap μ. The result is the value v.
 (define-metafunction ippc-machine
-  val : e ρ ρ μ -> v
-  [(val number_1 ρ_1 ρ_2 μ_1) number_1]
-  [(val x_t ρ_1 ρ_2 μ_1) v_t
-                         (where ((x_1 v_1) ... (x_t v_t) (x_n v_n) ...) ρ_1)]
-  [(val x_t ρ_1 ρ_2 μ_1) v_t
-                         (where ((x_1 v_1) ... (x_t v_t) (x_n v_n) ...) ρ_2)
-                         (side-condition (not (assoc (term x_t) (term ρ_1))))]
-  [(val (~ e_1) ρ_1 ρ_2 μ_1) ,(- (term (val e_1 ρ_1 ρ_2 μ_1)))]
-  [(val (! e_1) ρ_1 ρ_2 μ_1) ,(if (= (term (val e_1 ρ_1 ρ_2 μ_1)) 0) 1 0)]
-  [(val (+ e_1 e_2) ρ_1 ρ_2 μ_1) ,(+ (term (val e_1 ρ_1 ρ_2 μ_1)) (term (val e_2 ρ_1 ρ_2 μ_1)))]
-  [(val (- e_1 e_2) ρ_1 ρ_2 μ_1) ,(- (term (val e_1 ρ_1 ρ_2 μ_1)) (term (val e_2 ρ_1 ρ_2 μ_1)))]
-  [(val (&& e_1 e_2) ρ_1 ρ_2 μ_1) ,(if (= (term (val e_1 ρ_1 ρ_2 μ_1)) 1) (term (val e_2 ρ_1 ρ_2 μ_1)) 0)]
-  [(val (|| e_1 e_2) ρ_1 ρ_2 μ_1) ,(if (= (term (val e_1 ρ_1 ρ_2 μ_1)) 0) (term (val e_2 ρ_1 ρ_2 μ_1)) 1)]
-  [(val (== e_1 e_2) ρ_1 ρ_2 μ_1) ,(if (= (term (val e_1 ρ_1 ρ_2 μ_1)) (term (val e_2 ρ_1 ρ_2 μ_1))) 1 0)]
-  [(val (chunk-read e_1 e_2) ρ_1 ρ_2 μ_1) (chunk-read-meta c_1 v_2)
-                                          (where i_1 (val e_1 ρ_1 ρ_2 μ_1))
-                                          (where v_2 (val e_2 ρ_1 ρ_2 μ_1))
-                                          (side-condition (number? (term v_2)))
-                                          (where ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...) μ_1)])
+  val : e ρ μ -> v
+  [(val number_1 ρ_1  μ_1) number_1]
+  [(val x_t ρ_1  μ_1) v_t
+                      (where ((x_1 v_1) ... (x_t v_t) (x_n v_n) ...) ρ_1)]
+  [(val (~ e_1) ρ_1 μ_1) ,(- (term (val e_1 ρ_1 μ_1)))]
+  [(val (! e_1) ρ_1 μ_1) ,(if (= (term (val e_1 ρ_1 μ_1)) 0) 1 0)]
+  [(val (+ e_1 e_2) ρ_1 μ_1) ,(+ (term (val e_1 ρ_1 μ_1)) (term (val e_2 ρ_1 μ_1)))]
+  [(val (- e_1 e_2) ρ_1 μ_1) ,(- (term (val e_1 ρ_1 μ_1)) (term (val e_2 ρ_1 μ_1)))]
+  [(val (&& e_1 e_2) ρ_1 μ_1) ,(if (= (term (val e_1 ρ_1 μ_1)) 1) (term (val e_2 ρ_1 μ_1)) 0)]
+  [(val (|| e_1 e_2) ρ_1 μ_1) ,(if (= (term (val e_1 ρ_1 μ_1)) 0) (term (val e_2 ρ_1 μ_1)) 1)]
+  [(val (== e_1 e_2) ρ_1 μ_1) ,(if (= (term (val e_1 ρ_1 μ_1)) (term (val e_2 ρ_1 μ_1))) 1 0)]
+  [(val (chunk-read e_1 e_2) ρ_1 μ_1) (Chunk-read c_1 v_2)
+                                      (where i_1 (val e_1 ρ_1 μ_1))
+                                      (where v_2 (val e_2 ρ_1 μ_1))
+                                      (side-condition (number? (term v_2)))
+                                      (where ((i_b c_b) ... (i_1 c_1) (i_a c_a) ...) μ_1)])
 
 ; Control flow
 ; ------------
